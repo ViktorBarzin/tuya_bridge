@@ -137,7 +137,6 @@ def device_functions(device_id):
 
 @app.route("/devices/<device_id>/commands", methods=["POST"])
 def device_commands(device_id):
-    send_message(f"Handling POST for {device_id}")
     log.info(f"Handling POST for {device_id}")
     check_auth()
     body = request.get_json(silent=True) or {}
@@ -155,11 +154,9 @@ def device_commands(device_id):
     # commands is expected to be a list like: [{"code":"switch_1","value":true}, ...]
     payload = {"commands": commands}
     try:
-        send_message(f"Handling {commands} for {device_id}")
         log.info(f"Handling {commands} for {device_id}")
         res = cloud.sendcommand(device_id, payload)
-        send_message(f"Successfully handled {commands} for {device_id}: {res}")
-        log.info(f"Successfully handled {commands} for {device_id}")
+        log.info(f"Successfully handled {commands} for {device_id}: {res}")
         return jsonify({"success": True, "result": res})
     except Exception as e:
         msg = f"Failed to send command {payload} to {device_id}: {e}"
