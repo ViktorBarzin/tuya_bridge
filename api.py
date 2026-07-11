@@ -8,6 +8,7 @@ from prometheus_client import generate_latest
 import tinytuya
 
 from prometheus_exporter import collect_metrics
+from notifications import command_processed_message
 from slack import send_message
 
 # --- Logging ---
@@ -157,6 +158,7 @@ def device_commands(device_id):
         log.info(f"Handling {commands} for {device_id}")
         res = cloud.sendcommand(device_id, payload)
         log.info(f"Successfully handled {commands} for {device_id}: {res}")
+        send_message(command_processed_message(device_id, commands))
         return jsonify({"success": True, "result": res})
     except Exception as e:
         msg = f"Failed to send command {payload} to {device_id}: {e}"
