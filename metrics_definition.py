@@ -23,7 +23,7 @@ _ERROR_LOG_THROTTLE_SECONDS = 60
 _last_error_log: dict[tuple, float] = {}
 
 
-def _log_tuya_error(result: Any) -> None:
+def _log_tuya_error(result: Any, is_auth: bool) -> None:
     code = result.get("code") if isinstance(result, dict) else None
     msg = result.get("msg") if isinstance(result, dict) else None
     key = (code, msg)
@@ -31,7 +31,63 @@ def _log_tuya_error(result: Any) -> None:
     if now - _last_error_log.get(key, 0.0) < _ERROR_LOG_THROTTLE_SECONDS:
         return
     _last_error_log[key] = now
-    log.error("Tuya Cloud error: code=%s msg=%s", code, msg)
+    log.error("Tuya Cloud error: code=%s msg=%s auth=%s", code, msg, is_auth)
+
+
+# Tuya Cloud business error codes (and tinytuya wrapper codes, ERR_* = 9xx) that
+# mean the CREDENTIAL / SUBSCRIPTION / PERMISSION is the problem — i.e. a human
+# must renew the subscription or rotate the API key. Only these drive
+# tuya_cloud_up to 0 (which fires the TuyaCloudDown "renew subscription" alert).
+# Every other failure — transient server errors like 501 "request fail with
+# unknown error", rate limits, timeouts, or ANY code we don't recognise — leaves
+# the gauge at 1, so a Tuya-side hiccup is never misreported as an expired key.
+_AUTH_ERROR_CODES = frozenset(
+    {
+        1106,  # permission deny
+        28841002,  # no permissions — cloud subscription / trial expired (documented)
+        28841101,  # no permissions — API/resource not authorized for this project
+        28841105,  # insufficient permissions
+        909,  # tinytuya ERR_CLOUDKEY — missing/invalid Tuya key & secret
+    }
+)
+
+# Unambiguous auth/subscription phrases. A match makes us "certain" even when the
+# numeric code is one Tuya added that we haven't enumerated. Kept narrow so a
+# transient message (e.g. "request fail with unknown error") never matches.
+_AUTH_ERROR_MSG_MARKERS = (
+    "no permission",
+    "permission deny",
+    "not subscribed",
+    "subscription",
+    "not authorized",
+)
+
+
+def _is_auth_error(result: Any) -> bool:
+    """True only when we are CERTAIN a Tuya failure is an auth/permission/
+    subscription problem (renew the subscription or rotate the key).
+
+    Returns False for transient server errors (e.g. code 501), rate limits,
+    tinytuya connect/timeout/token wrappers, and any unrecognised code — those
+    must not masquerade as an expired key. Tuya normally replies HTTP 200 with a
+    business ``code`` in the body, but a genuine HTTP 4xx (if ever surfaced) also
+    counts as certain.
+    """
+    if not isinstance(result, dict):
+        return False
+    for status_key in ("http_status", "status_code", "status"):
+        status = result.get(status_key)
+        if isinstance(status, int) and 400 <= status < 500:
+            return True
+    code = result.get("code")
+    if isinstance(code, int) and code in _AUTH_ERROR_CODES:
+        return True
+    msg = result.get("msg")
+    if isinstance(msg, str):
+        lowered = msg.lower()
+        if any(marker in lowered for marker in _AUTH_ERROR_MSG_MARKERS):
+            return True
+    return False
 
 
 @dataclass
@@ -50,20 +106,27 @@ class MetricsDefinition(ABC):
     def _extract_datapoints(self, result: Any) -> list | None:
         """Validate a Tuya Cloud response and emit the tuya_cloud_up gauge.
 
-        Returns the device datapoint list on success, or None if the cloud
-        rejected the call (expired subscription, rate limit, etc.). Callers
-        should return self.registry unchanged when this returns None so the
-        /metrics endpoint stays 200 OK with just tuya_cloud_up=0.
+        Returns the device datapoint list on success, or None if the call did
+        not yield data. Callers should return self.registry unchanged when this
+        returns None so the /metrics endpoint stays 200 OK.
+
+        tuya_cloud_up drops to 0 ONLY when we are certain the failure is an
+        auth/permission/subscription problem (see ``_is_auth_error``). A
+        transient Tuya server error (e.g. code 501) leaves the gauge at 1 so it
+        is never mistaken for an expired key — a sustained transient still shows
+        up downstream as a *MetricsMissing alert.
         """
         up = Gauge(
             "tuya_cloud_up",
-            "1 if the last Tuya Cloud call for this device succeeded, 0 otherwise",
+            "1 unless Tuya Cloud rejected the call for an auth/permission/"
+            "subscription reason; transient server errors (e.g. 501) keep it 1",
             registry=self.registry,
         )
         data = result.get("result") if isinstance(result, dict) else None
         if not isinstance(data, list):
-            up.set(0)
-            _log_tuya_error(result)
+            is_auth = _is_auth_error(result)
+            up.set(0 if is_auth else 1)
+            _log_tuya_error(result, is_auth)
             return None
         up.set(1)
         return data
