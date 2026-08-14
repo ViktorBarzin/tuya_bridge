@@ -10,6 +10,7 @@ import tinytuya
 from prometheus_exporter import collect_metrics
 from notifications import command_processed_message
 from slack import send_message
+from tuya_http import install_request_timeout
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -28,9 +29,19 @@ SERVICE_API_KEY = os.getenv("SERVICE_API_KEY", "change-me")  # used by clients (
 HEALTH_PROBE_INTERVAL = int(os.getenv("HEALTH_PROBE_INTERVAL", "60"))
 HEALTH_STALE_AFTER = int(os.getenv("HEALTH_STALE_AFTER", "300"))
 
+# Timeouts for every call into the Tuya Cloud. tinytuya sets none of its own, so
+# a stalled connect used to hold a worker until gunicorn killed it (infra#23).
+# Measured Tuya latency from the cluster is ~0.15s and connect ~0.03s, so these
+# leave a wide margin while still failing well inside the worker timeout.
+TUYA_CONNECT_TIMEOUT = int(os.getenv("TUYA_CONNECT_TIMEOUT", "3"))
+TUYA_READ_TIMEOUT = int(os.getenv("TUYA_READ_TIMEOUT", "10"))
+
 if not (TINYTUYA_API_KEY and TINYTUYA_API_SECRET):
     log.error("Missing TINYTUYA_API_KEY or TINYTUYA_API_SECRET environment variables.")
     raise SystemExit("Missing Tuya credentials")
+
+# Must precede the first Cloud(...) — the constructor already fetches a token.
+install_request_timeout(connect=TUYA_CONNECT_TIMEOUT, read=TUYA_READ_TIMEOUT)
 
 # --- Initialize Cloud client (tinytuya handles tokens internally) ---
 log.info("Initializing TinyTuya Cloud client for region=%s", TINYTUYA_REGION)

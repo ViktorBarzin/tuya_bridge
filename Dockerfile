@@ -18,5 +18,9 @@ COPY . .
 # default port
 EXPOSE 8080
 
-# run with gunicorn
-CMD ["gunicorn", "-w", "4", "--timeout", "60", "--graceful-timeout", "30", "-b", "0.0.0.0:8080", "api:app"]
+# Run with gunicorn. The workload is entirely network I/O against the Tuya
+# Cloud, so concurrency comes from threads rather than more workers: a stalled
+# call occupies one thread instead of a whole worker, and threads fit the 256Mi
+# limit that four more processes would not. --timeout stays a backstop only —
+# Tuya calls are bounded by their own connect/read timeouts (see tuya_http.py).
+CMD ["gunicorn", "-w", "4", "-k", "gthread", "--threads", "4", "--timeout", "60", "--graceful-timeout", "30", "-b", "0.0.0.0:8080", "api:app"]

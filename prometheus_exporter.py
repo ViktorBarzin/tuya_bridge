@@ -1,8 +1,9 @@
 from abc import abstractmethod
+import threading
 import time
 import cachetools
 from typing import Any, override
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, stop_after_delay, wait_exponential
 import tinytuya
 from prometheus_client import (
     CollectorRegistry,
@@ -30,8 +31,19 @@ device_id_to_metrics: dict[str, type[MetricsDefinition]] = {
 }
 
 
-@cachetools.cached(cache)
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+# The cache is shared by the gunicorn worker's request threads, so its lookups
+# need a lock; cachetools still calls collect_metrics outside it, meaning a slow
+# Tuya call never blocks the other threads.
+#
+# stop_after_delay caps the whole retry sequence. Retries exist for transient
+# Tuya errors, which fail fast and so still get all three attempts; a call that
+# instead burns its connect/read timeout gives up early rather than stacking
+# three of them, which no caller is still waiting for by then anyway.
+@cachetools.cached(cache, lock=threading.Lock())
+@retry(
+    stop=stop_after_attempt(3) | stop_after_delay(15),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+)
 def collect_metrics(cloud: tinytuya.Cloud, device_id: str) -> CollectorRegistry:
     registry = CollectorRegistry()
 

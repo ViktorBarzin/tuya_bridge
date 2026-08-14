@@ -1,3 +1,4 @@
 tinytuya.json
 __pycache__/
 .worktrees/
+.venv/
