@@ -1,0 +1,7 @@
+# Keep CI artifacts and VCS metadata out of the image. The GHA build downloads
+# the svu binary into the workspace, and COPY . . would otherwise ship it.
+.git
+.github
+.woodpecker
+.worktrees
+svu
