@@ -8,7 +8,6 @@ from prometheus_client import generate_latest
 import tinytuya
 
 from prometheus_exporter import collect_metrics
-from notifications import command_processed_message
 from slack import send_message
 from tuya_http import install_request_timeout
 
@@ -168,8 +167,8 @@ def device_commands(device_id):
     try:
         log.info(f"Handling {commands} for {device_id}")
         res = cloud.sendcommand(device_id, payload)
+        # Success is log-only; only failures post to Slack (2026-07-02 rule).
         log.info(f"Successfully handled {commands} for {device_id}: {res}")
-        send_message(command_processed_message(device_id, commands))
         return jsonify({"success": True, "result": res})
     except Exception as e:
         msg = f"Failed to send command {payload} to {device_id}: {e}"
