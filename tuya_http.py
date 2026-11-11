@@ -70,3 +70,16 @@ def install_request_timeout(connect: int, read: int) -> None:
         module.requests = TimeoutRequests(current, timeout)
 
     log.info("Tuya HTTP timeout: connect=%ss read=%ss", connect, read)
+
+
+def ensure_token(cloud: tinytuya.Cloud) -> None:
+    """Re-acquire the Tuya token if a previous renewal left it unset.
+
+    tinytuya's `_gettoken()` clears `token` before it asks for a new one, so a
+    renewal that raises (e.g. ReadTimeout from the timeout above) leaves it
+    None. tinytuya never retries after that: every call returns its `error`
+    (None) and `getdevices()` raises TypeError until the worker restarts
+    (infra#126). Call this before every Tuya call.
+    """
+    if not cloud.token:
+        cloud._gettoken()

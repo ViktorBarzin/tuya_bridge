@@ -11,6 +11,7 @@ from prometheus_client import (
     Gauge,
 )
 
+from tuya_http import ensure_token
 from metrics_definition import (
     AutomaticTransferSwitch,
     Fuse,
@@ -45,6 +46,7 @@ device_id_to_metrics: dict[str, type[MetricsDefinition]] = {
     wait=wait_exponential(multiplier=1, min=2, max=10),
 )
 def collect_metrics(cloud: tinytuya.Cloud, device_id: str) -> CollectorRegistry:
+    ensure_token(cloud)
     registry = CollectorRegistry()
 
     collector = device_id_to_metrics[device_id](

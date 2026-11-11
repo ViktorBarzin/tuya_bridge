@@ -12,6 +12,7 @@ class FakeCloud:
     """Stand-in for tinytuya.Cloud so importing api makes no network calls."""
 
     def __init__(self, *args, **kwargs) -> None:
+        self.token = "test-token"
         self.sendcommand = mock.Mock(return_value={"success": True})
 
     def getdevices(self) -> list:

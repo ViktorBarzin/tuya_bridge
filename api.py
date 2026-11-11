@@ -9,7 +9,7 @@ import tinytuya
 
 from prometheus_exporter import collect_metrics
 from slack import send_message
-from tuya_http import install_request_timeout
+from tuya_http import ensure_token, install_request_timeout
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +62,7 @@ def _tuya_probe_loop() -> None:
     global _last_tuya_success, _last_tuya_error
     while True:
         try:
+            ensure_token(_probe_cloud)
             result = _probe_cloud.getdevices()
             if isinstance(result, list):
                 with _probe_lock:
@@ -117,6 +118,7 @@ def health():
 def list_devices():
     check_auth()
     try:
+        ensure_token(cloud)
         devices = cloud.getdevices()
         return jsonify({"success": True, "devices": devices})
     except Exception as e:
@@ -128,6 +130,7 @@ def list_devices():
 def device_status(device_id):
     check_auth()
     try:
+        ensure_token(cloud)
         status = cloud.getstatus(device_id)
         return jsonify({"success": True, "status": status})
     except Exception as e:
@@ -139,6 +142,7 @@ def device_status(device_id):
 def device_functions(device_id):
     check_auth()
     try:
+        ensure_token(cloud)
         funcs = cloud.getfunctions(device_id)
         return jsonify({"success": True, "functions": funcs})
     except Exception as e:
@@ -166,6 +170,7 @@ def device_commands(device_id):
     payload = {"commands": commands}
     try:
         log.info(f"Handling {commands} for {device_id}")
+        ensure_token(cloud)
         res = cloud.sendcommand(device_id, payload)
         # Success is log-only; only failures post to Slack (2026-07-02 rule).
         log.info(f"Successfully handled {commands} for {device_id}: {res}")
